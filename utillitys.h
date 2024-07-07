@@ -163,3 +163,24 @@ int createWelcomeSocket(int port, int maxClient){
     }
     return serverSocket;
 }
+
+void splitIpPort(const char *input, char *ip_address, int *port) {
+	char input_copy[21];  // Maximum length is 20 + 1 for null terminator
+    strncpy(input_copy, input, sizeof(input_copy));
+    input_copy[sizeof(input_copy) - 1] = '\0';  // Ensure null-terminated
+
+    // Tokenize the input string using strtok
+    char *ptr = strtok(input_copy, ":");
+
+    // First token is the IP address
+    if (ptr != NULL) {
+        strncpy(ip_address, ptr, 16);  // Assuming maximum length of IP address is 15 characters
+        ip_address[15] = '\0';  // Ensure null-terminated
+    }
+
+    // Second token is the port number
+    ptr = strtok(NULL, ":");
+    if (ptr != NULL) {
+        *port = atoi(ptr);  // Convert string to integer
+    }
+}

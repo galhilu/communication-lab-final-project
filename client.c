@@ -15,8 +15,10 @@
 #define BASE_PORT 1200
 #define LB_IP "127.0.0.1"             //change to fit for each run
 #define LB_PORT 6500
+#define MESSAGE_COUNT_TO_SERVER 2
 
 int send_message(int sock, int type, char* header, char* payload, int payload_len);
+void splitIpPort(const char *input, char *ip_address, int *port);
 struct message* get_message(int soc);
 
 
@@ -108,13 +110,30 @@ void client(int start_data[]){
 
     //parse data from lb_response
     char job_id = lb_response.header[0];
-    char server_ip_addr[15] = lb_response.payload[];
+    char server_ip_addr[16];
+    int port;
+    get_ip_port(lb_response.payload, server_ip_addr, server_port);
+
 
     //close connection to LB
     printf("closing connection to LB");
     close(lb_sock);
 
     //connect to server
+    struct sockaddr_in server_soc_Addr;
+    server_soc_Addr.sin_family = AF_INET;
+    server_soc_Addr.sin_port = htons(port);
+    server_soc_Addr.sin_addr.s_addr = inet_addr(server_ip_addr);
+    res = connect(server_sock, (struct sockaddr*)&server_soc_Addr, sizeof(server_soc_Addr));
+    printf("connect to server: %d\n", res);
+
+    //send and receive 2 messages from server
+    int message_count = 0;
+    while(message_count<MESSAGE_COUNT_TO_SERVER){
+
+    }
+
+
 
 
 
