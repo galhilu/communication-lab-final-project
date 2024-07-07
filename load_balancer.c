@@ -4,11 +4,11 @@
 #include <time.h>
 #include <sys/socket.h>
 #include <netinet/in.h> 
-//#include <arpa/inet.h>
 #include <assert.h>
 #include <string.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include "utillitys.h"
 
 //----------constants and global vars-----------------------------
 //adresses
@@ -51,18 +51,18 @@ LB job
     payload:
 
 LB update
-    description: sent from LB in multiycast, asking for updates from all servers
+    description: sent from LB in multicast, asking for updates from all servers
     header: type[1]
     payload: 
 
 server update
     description: sent from a server to LB, as registration message and after LB asked for an update
     header: type[1]capacity[1]
-    payload: client welcome socket addrss[20]
+    payload: client welcome socket addrss[20](max)
 LB ack
-    description: LB to server, confirming registration and sending miltycast addres to listen to
+    description: LB to server, confirming registration and sending multicast addres to listen to
     header: type[1]
-    payload:
+    payload: multicast address[15](max)
 
 client req
     description: from client to LB to ask for a server to do a job
@@ -76,8 +76,9 @@ job ack
 
 client req ack
     description: from LB to client, sent to tell client where server is at for the job asked
-    header: type[1] job id[1]
-    payload: client welcome socket addrss[20]
+    type[1]
+    header: job id[1]
+    payload: client welcome socket addrss[20](max)
 ----------------------------------------------------------------------------*/
 
 //constants
@@ -108,12 +109,12 @@ struct job_confirmation{
     time_t time;        
 };
 
-struct message{
-    int type;
-    char header[3]; //change to be longest header length
-    char payload[127-3];//make sure header + payload=127
-    int payload_len;
-};
+// struct message{
+//     int type;
+//     char header[3]; //change to be longest header length
+//     char payload[127-3];//make sure header + payload=127
+//     int payload_len;
+// };
 
 
 
@@ -121,7 +122,7 @@ struct message{
 //global vars
 struct server_registry registerd_servers;   //struct for saving registerd servers info
 
-int header_length[]={LB_JOB_H_LEN,LB_UPDATE_H_LEN,LB_ACK_H_LEN,JOB_ACK_H_LEN,SERVER_UPDATE_H_LEN}; //header_length[message type]= header length of that message type
+//int header_length[]={LB_JOB_H_LEN,LB_UPDATE_H_LEN,LB_ACK_H_LEN,JOB_ACK_H_LEN,SERVER_UPDATE_H_LEN}; //header_length[message type]= header length of that message type
 
 struct job_confirmation job_confirmation_list[JOB_CONF_LEN]; //job confirmation list, a job confirmation that was not collected for 3 seconds will be trashed by main thread
 int job_id=1;   //id to identify job reqs, can go up to 127
@@ -135,66 +136,71 @@ pthread_mutex_t servers_num_mutex;
 //-------------------------------------------------------------------------
 
 //------------utillity functions---------------------------------
-int send_message(int sock,int type,char* header,char* payload,int payload_len){
-    char* full_header=(char*)malloc(sizeof(char)*header_length[type]);
-    strcpy(full_header,(char)type);         //construct header
-    strcat(full_header,header);
+// int send_message(int sock,int type,char* header,char* payload,int payload_len){
+//     char* full_header=(char*)malloc(sizeof(char)*header_length[type]);
+//     char temp[2];
+//     sprintf(temp,"%d",type);
+//     strcpy(full_header,temp);         //construct header
+//     strcat(full_header,header);
 
-    int len=sizeof(full_header)+sizeof(char)*payload_len;
+//     int len=sizeof(full_header)+sizeof(char)*payload_len;
     
-    if (len>127){       //max len is 127 (can fit in char)
-        printf("message length exeeded, max len is 127byte tried to send:%dbytes\n",len);
-        free(full_header);
-        return -1;
-    }
-    char* message=(char*)malloc((header_length[type]+payload_len+1) * sizeof(char));    //extra char for message length (excluding the size of the length indicator)
-    strcpy(message,(char)len);
-    strcat(message,full_header);
-    strcat(message,payload);
-    free(full_header);
-    int res;
-    res=send(sock,message,sizeof(message),0);
-    return res;
+//     if (len>127){       //max len is 127 (can fit in char)
+//         printf("message length exeeded, max len is 127byte tried to send:%dbytes\n",len);
+//         free(full_header);
+//         return -1;
+//     }
+//     char* message=(char*)malloc((header_length[type]+payload_len+1) * sizeof(char));    //extra char for message length (excluding the size of the length indicator)
+//     sprintf(temp,"%d",len);
+//     strcpy(message,temp);
+//     strcat(message,full_header);
+//     strcat(message,payload);
+//     free(full_header);
+//     int res;
+//     res=send(sock,message,sizeof(message),0);
+//     return res;
 
-    
 
-}
+// }
 
-struct message* get_message(int soc){        
-    char buff;
-    int res;
-    res=recv(soc,buff,sizeof(char),0);       
-    if (res==-1){                           //error
-        printf("got invalid recv length\n");
-        return NULL;
-    }
-    if (res==0){                            //time out
-        printf("timeout reciving length\n");
-        return NULL;
-    }
-    char* message_buff=(char*)malloc((buff) * sizeof(char));
-    res=recv(soc,message_buff,sizeof(message_buff),0);
-    if (res==-1){
-        printf("got invalid recv\n");       //error
-        free(message_buff);
-        return NULL;
-    }if (res==0){
-        printf("timeout reciving\n");       //time out
-        return NULL;
-    }
-    struct message* new_message;
-    new_message->type=(int)message_buff[0];
-    strncpy(new_message->header,message_buff,header_length[new_message->type]);
-    strncpy(new_message->payload,message_buff+sizeof(char)*header_length[new_message->type],header_length[new_message->type]);
-    new_message->payload_len=sizeof(message_buff)-header_length[new_message->type];
-    return new_message;
-}
+// struct message* get_message(int soc){        
+//     char* buff;
+//     int res;
+//     res=recv(soc,buff,sizeof(char),0);       
+//     if (res==-1){                           //error
+//         printf("got invalid recv length\n");
+//         return NULL;
+//     }
+//     if (res==0){                            //time out
+//         printf("timeout reciving length\n");
+//         return NULL;
+//     }
+//     int temp = atoi(buff);
+//     char* message_buff=(char*)malloc(temp * sizeof(char));
+//     res=recv(soc,message_buff,sizeof(message_buff),0);
+//     if (res==-1){
+//         printf("got invalid recv\n");       //error
+//         free(message_buff);
+//         return NULL;
+//     }if (res==0){
+//         printf("timeout reciving\n");       //time out
+//         return NULL;
+//     }
+//     struct message* new_message;
+//     new_message->type=(int)message_buff[0];
+//     strncpy(new_message->header,message_buff,header_length[new_message->type]);
+//     strncpy(new_message->payload,message_buff+sizeof(char)*header_length[new_message->type],header_length[new_message->type]);
+//     new_message->payload_len=sizeof(message_buff)-header_length[new_message->type];
+//     return new_message;
+// }
 
 
 //-------------------------------------------------------------------------
 
 
-void server_connection(int com_sock){
+void server_connection(void* soc){
+    int com_sock=*(int*)soc;
+    printf("in server connection\n");
     struct message* register_mssg_ptr=get_message(com_sock);
     if(register_mssg_ptr==NULL){
         pthread_mutex_lock(&servers_num_mutex);
@@ -205,11 +211,15 @@ void server_connection(int com_sock){
     }
     struct message register_mssg=*register_mssg_ptr;
     if(register_mssg.type!=SERVER_UPDATE){
-        printf("got invalid register message,closing connection\n");
+        printf("got invalid register message of type %d,closing connection\n",register_mssg.type);
         close(com_sock);
         return;
     }
-    //send LB ack to server with multicast addr
+    printf("yay\n");
+    char lb_ack_payload[15];
+    strcpy(lb_ack_payload,MULTY_IP);
+    send_message(com_sock,LB_ACK,"",lb_ack_payload,sizeof(lb_ack_payload));             //send LB ack to server with multicast addr
+    
     struct server_data server;
     server.comm_soc=com_sock;
     server.capacity=(int)register_mssg.header[1];
@@ -233,7 +243,7 @@ void server_connection(int com_sock){
     
     if (i==MAX_SERVERS){             //all spots are taken, reject server
         close(com_sock);
-        print("server was rejected, max servers reached\n");
+        printf("server was rejected, max servers reached\n");
         return;
     }
     int server_index=i;
@@ -247,7 +257,7 @@ void server_connection(int com_sock){
     setsockopt(server.comm_soc, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
     printf("server of id %d was registered\n",server.id);
     while (running)
-    {
+    { 
         struct message* new_message_ptr=get_message(com_sock);
         if(new_message_ptr!=NULL){
             struct message new_message=*new_message_ptr;
@@ -389,8 +399,11 @@ void client_connection(int com_sock){
         int res;
         int not_rejected=1;
         char header[LB_JOB_H_LEN];
-        strcpy(header,(char)capacity);
-        strcat(header,(char)job_id);
+        char* temp;
+        sprintf(temp,"%d",capacity);
+        strcpy(header,temp);
+        sprintf(temp,"%d",job_id);
+        strcat(header,temp);
         res=send_message(registerd_servers.servers[server_index].comm_soc,LB_JOB,header,payload,sizeof(payload));
         if(res==-1){
             printf("couldnt contact server, trying diffrent one\n");
@@ -406,7 +419,7 @@ void client_connection(int com_sock){
                     if(job_confirmation_list[i].answer==1){
                         char payload[20];   //contains servers welcome socket address
                         strcpy(payload,job_confirmation_list[i].client_sock);
-                        res=send_message(com_sock,CLIENT_REQ_ACK,(char)job_id,payload,sizeof(payload));
+                        res=send_message(com_sock,CLIENT_REQ_ACK,temp,payload,sizeof(payload));
                         if(res==-1){
                             printf("couldnt contact client, close connection\n");
                             close(com_sock);
@@ -446,26 +459,42 @@ void client_connection(int com_sock){
 
 
 int main() {
+    fd_set welcome_sockets,welcome_sockets_loop;
+    int res;
     int client_welcom_socket = socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
     assert (client_welcom_socket != -1);
     struct sockaddr_in client_soc_Addr;
     client_soc_Addr.sin_family = AF_INET;
     client_soc_Addr.sin_port = htons(CLIENT_PORT);
     client_soc_Addr.sin_addr.s_addr = INADDR_ANY;
-    bind(client_welcom_socket, (struct sockaddr*)&client_soc_Addr , sizeof(client_soc_Addr));
+    res=bind(client_welcom_socket, (struct sockaddr*)&client_soc_Addr , sizeof(client_soc_Addr));
+    listen(client_welcom_socket,5);
+    printf("%d\n",res);
 
-
-    int server_welcom_socket= socket(AF_INET, SOCK_STREAM|SOCK_NONBLOCK, 0);
+    int server_welcom_socket= socket(AF_INET, SOCK_STREAM, 0);
+    //int server_welcom_socket= socket(AF_INET, SOCK_STREAM, 0);
     assert (server_welcom_socket != -1);
     struct sockaddr_in server_soc_Addr;
     server_soc_Addr.sin_family = AF_INET;
     server_soc_Addr.sin_port = htons(SERVER_PORT);
     server_soc_Addr.sin_addr.s_addr = INADDR_ANY;
-    bind(server_welcom_socket, (struct sockaddr*)&server_soc_Addr , sizeof(server_soc_Addr));
-    
+    res=bind(server_welcom_socket, (struct sockaddr*)&server_soc_Addr , sizeof(server_soc_Addr));
+    listen(server_welcom_socket,5);
+    FD_ZERO(&welcome_sockets);
+    printf("%d\n",res);
+    FD_SET(client_welcom_socket,&welcome_sockets);
+
+    FD_SET(server_welcom_socket,&welcome_sockets);
     //create multicast port
     time_t update_timer;
     time_t job_conf_clean_timer;
+    struct timeval select_timeout;
+    select_timeout.tv_sec=1;
+    select_timeout.tv_usec=0;
+    int max=client_welcom_socket;
+    if(client_welcom_socket<server_welcom_socket){
+        max=server_welcom_socket;
+    }
     int state=START;
     int running=1;
     int i;
@@ -480,7 +509,7 @@ int main() {
                 registerd_servers.servers[i].updated=0;
                 registerd_servers.servers[i].id=0;
                 if (pthread_mutex_init(&registerd_servers_mutex[i],NULL)!=0){       
-                print("failed to init registerd_servers_mutex in index %d ",i);
+                printf("failed to init registerd_servers_mutex in index %d ",i);
                 }
             }
             for(i=0;i<JOB_CONF_LEN;i++){
@@ -488,55 +517,94 @@ int main() {
                     job_confirmation_list[i].server_id=0;
                     job_confirmation_list[i].time=0;
                 }
-                
+
             if (pthread_mutex_init(&servers_num_mutex,NULL)!=0){      
-                print("failed to init servers_num_mutex");
+                printf("failed to init servers_num_mutex");
             }
             if (pthread_mutex_init(&job_confirmation_list_mutex,NULL)!=0){
-                print("failed to init job_confirmation_list_mutex");
+                printf("failed to init job_confirmation_list_mutex");
             }
             if (pthread_mutex_init(&job_id_mutex,NULL)!=0){
-                print("failed to init job_id_mutex");
+                printf("failed to init job_id_mutex");
             }
             if (pthread_mutex_init(&server_id_mutex,NULL)!=0){
-                print("failed to init server_id_mutex");
+                printf("failed to init server_id_mutex");
             }
             update_timer=time(NULL);
             job_conf_clean_timer= time(NULL);
             state=LISTENING;
-            break;
 
         case LISTENING:
-            if(listen(server_welcom_socket,1)>0){                           //need to make sure that returns num of waiting and not 0 for sucsses in non blocking
-                int new_server_sock=accept(server_welcom_socket,(struct sockaddr*)&server_soc_Addr , sizeof(server_soc_Addr));  //if welcome soc is non block will this be?
+            //printf("listning\n");
+            //select(FD_SETSIZE,&welcome_sockets,NULL,NULL,&select_timeout);
+            
+            //printf("%d",FD_ISSET(server_welcom_socket,&welcome_sockets));
+            //sleep(1);
+            //res=select(FD_SETSIZE,&welcome_sockets,NULL,NULL,&select_timeout);
+            //printf("%d\n",res);
+            FD_ZERO(&welcome_sockets);
+            FD_SET(client_welcom_socket,&welcome_sockets);
+
+            FD_SET(server_welcom_socket,&welcome_sockets);
+            printf("%d\n",select(max+1,&welcome_sockets,NULL,NULL,&select_timeout));       //maby neet to change to max
+            select_timeout.tv_sec=1;
+            if(FD_ISSET(server_welcom_socket,&welcome_sockets)){
+                //FD_ZERO(&welcome_sockets);
+                socklen_t addr_len;              //need to make sure that returns num of waiting and not 0 for sucsses in non blocking
+                addr_len = sizeof(server_soc_Addr);
+                int new_server_sock=accept(server_welcom_socket,(struct sockaddr*)&server_soc_Addr , &addr_len);  //if welcome soc is non block will this be?
                 if(registerd_servers.servers_num<MAX_SERVERS){
                     struct timeval tv;
-                    tv.tv_sec = FIRST_MSSG_TIMEOUT;
+                    tv.tv_sec = 15;
                     tv.tv_usec = 0;
                     setsockopt(new_server_sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
                     pthread_mutex_lock(&servers_num_mutex);
                     registerd_servers.servers_num++;
                     pthread_mutex_unlock(&servers_num_mutex);
                     pthread_t server_thread;
-                    pthread_create(&server_thread,NULL,client_connection,new_server_sock);
+                    pthread_create(&server_thread,NULL,(void*)&server_connection,(void*) &new_server_sock);
                 }
                 else{
                     printf("main thread rejected a server, max server reached");
                     close(new_server_sock);
                 }
-            }
-
+                }
+        
+            // if(accept(server_welcom_socket,(struct sockaddr*)&server_soc_Addr , &addr_len);>0){  
+            //     printf("cool");           
+            //     socklen_t addr_len;              //need to make sure that returns num of waiting and not 0 for sucsses in non blocking
+            //     addr_len = sizeof(server_soc_Addr);
+            //     int new_server_sock=accept(server_welcom_socket,(struct sockaddr*)&server_soc_Addr , &addr_len);  //if welcome soc is non block will this be?
+            //     if(registerd_servers.servers_num<MAX_SERVERS){
+            //         struct timeval tv;
+            //         tv.tv_sec = FIRST_MSSG_TIMEOUT;
+            //         tv.tv_usec = 0;
+            //         setsockopt(new_server_sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+            //         pthread_mutex_lock(&servers_num_mutex);
+            //         registerd_servers.servers_num++;
+            //         pthread_mutex_unlock(&servers_num_mutex);
+            //         pthread_t server_thread;
+            //         pthread_create(&server_thread,NULL,(void*)&server_connection,(void*) &new_server_sock);
+            //     }
+            //     else{
+            //         printf("main thread rejected a server, max server reached");
+            //         close(new_server_sock);
+            //     }
+            // }
             if(listen(client_welcom_socket,1)>0){                           //need to make sure that returns num of waiting and not 0 for sucsses in non blocking
-                int new_client=accept(client_welcom_socket,(struct sockaddr*)&server_soc_Addr , sizeof(server_soc_Addr));
+                socklen_t addr_len;
+                addr_len = sizeof(client_soc_Addr);
+                int new_client=accept(client_welcom_socket,(struct sockaddr*)&server_soc_Addr , &addr_len);
                 struct timeval tv;
                 tv.tv_sec = FIRST_MSSG_TIMEOUT;
                 tv.tv_usec = 0;
                 setsockopt(new_client, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
                 pthread_t client_thread;
-                pthread_create(&client_thread,NULL,client_connection,new_client);
+                pthread_create(&client_thread,NULL,(void*)&client_connection,(void*)&new_client);
                 }
             
             if (time(NULL)-update_timer>=5){
+                printf("hehe\n");
                 for(i=0;i<MAX_SERVERS;i++){
                     registerd_servers.servers[i].updated=0;
                 }
@@ -556,11 +624,9 @@ int main() {
                 job_conf_clean_timer=time(NULL);   
 
             }
-                
-            break;
         }
     }
-
+    return 0;
 }
 
 
