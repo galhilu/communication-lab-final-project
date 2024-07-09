@@ -176,15 +176,17 @@ void server_connection(void* soc){
     tv.tv_usec = 0;
     fd_set server_rec,server_rec_loop;
     FD_ZERO(&server_rec);
-    FD_SET(com_sock,&server_rec);
+    FD_SET(server.comm_soc,&server_rec);
+    //FD_ZERO(&server_rec);
     printf("server of id %d was registered\n",server.id);
     while (running)
     {   server_rec_loop=server_rec;
         
-
-        printf("server select %d\n",select(com_sock+1,&server_rec_loop,NULL,NULL,&tv));
+        
+        printf("server select %d\n",select(server.comm_soc+1,&server_rec_loop,NULL,NULL,&tv));
+        //printf("melm %d\n",FD_ISSET(com_sock,&server_rec));
         tv.tv_sec=1;
-        if(FD_ISSET(com_sock,&server_rec)){
+        if(FD_ISSET(com_sock,&server_rec_loop)){
             printf("LB got message from server %d\n",server.id); 
             struct message* new_message_ptr=get_message(com_sock);
             if(new_message_ptr!=NULL){
@@ -246,7 +248,7 @@ void server_connection(void* soc){
         case WAITING_FOR_UPDATE:
             if(registerd_servers.servers[server_index].updated==0 &&time(NULL)-state_timer>5){
                 char message_payload[]="send me an update";
-                res=send_message(server.comm_soc,LB_UPDATE,"",message_payload,sizeof(message_payload));
+                res=send_message(com_sock,LB_UPDATE,"",message_payload,strlen(message_payload));
                 if (res==-1){
                     printf("failed to send LB update from server thread\n");
                 }
@@ -277,7 +279,7 @@ void server_connection(void* soc){
     pthread_mutex_unlock(&servers_num_mutex);
     close(server.comm_soc);
     printf("server %d is dead \n",server.id);
-    pthread_exit((void*)0);
+    pthread_exit(0);
     return;
 };
 

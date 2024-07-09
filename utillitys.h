@@ -67,18 +67,19 @@ struct message{
 
 
 int send_message(int sock,int type,char* header,char* payload,int payload_len){
-   
-    char* full_header=(char*)malloc(sizeof(char)*header_length[type]);
-    int len=(header_length[type]+payload_len) * sizeof(char);
+    int header_len=header_length[type];
+    char* full_header=(char*)malloc(header_len);
+    memset(full_header,0,header_len);
+    int len=(header_len+payload_len) * sizeof(char);
     char type_c[2];     //is 2 only to stop warnings, will always be 1 char long
-    char len_c[2];
     sprintf(type_c,"%d",type);
     printf("type:%s\n",type_c);
+    printf("full_header is :%s\n",full_header);
     strncpy(full_header,type_c,1);         //construct header
-    strncpy(full_header+1,header,header_length[type]-1);
-    //printf("full_header is :%s\n",full_header);
+    printf("full_header is :%s\n",full_header);
+    strncpy(full_header+1,header,header_len-1);
+    printf("full_header is :%s\n",full_header);
 
-    
     printf("want to send %d bytes long message\n",len);
     if (len>127){       //max len is 127 (can fit in char)
         printf("message length exeeded, max len is 127byte tried to send:%dbytes\n",len);
@@ -86,18 +87,21 @@ int send_message(int sock,int type,char* header,char* payload,int payload_len){
         return -1;
     }
     char* message=(char*)malloc((len+1) * sizeof(char));    //extra char for message length (excluding the size of the length indicator)
-    len_c[0]=(char)len+'0';
-    printf("len_c is:%s\n",len_c);
-    message[0]=len_c[0];
-    strcpy(message+1,full_header);
-    strcat(message,payload);
+    memset(message,0,(len+1) * sizeof(char));
+    message[0]=(char)len+'0';
+    //printf("len_c is:%s\n",(char)len+'0');
+    memcpy(message + 1, full_header, header_len);
+    memcpy(message + 1 + header_len, payload, payload_len);
+    //strcpy(message+1,full_header);
+    //strcat(message,payload);
     free(full_header);
     int res;
     printf("sent:%s\n",message);
     printf("ofsize:%ld\n",strlen(message));
 
-    res=send(sock,message,len+2,0);
+    res=send(sock,message,len+1,0);
     printf("send res= %d\n",res);
+    free(message);
     return res;
 
 }
@@ -108,20 +112,17 @@ struct message* get_message(int soc){
     int res;
     res=recv(soc,&buff,sizeof(buff),0);  
     printf("len buff is:%s\n",buff);     
-    if (res==-1){                           //error
-        printf("got invalid recv length\n");
-        perror("error:\n");
-        return NULL;
-    }
-    if (res==0){                            //time out
-        printf("timeout reciving length\n");
+    if (res <= 0) {  // Handle error or timeout
+        if (res == -1) {
+            perror("error: ");
+        }
         return NULL;
     }
     
-    int len = (int)(buff[0]-'0');
+    int len = buff[0]-'0';
     printf("receiving len of %d\n",len);
-    char* message_buff=(char*)malloc((len +1)* sizeof(char));
-    res=recv(soc,message_buff,len+1,0);
+    char* message_buff=(char*)malloc((len)* sizeof(char));
+    res=recv(soc,message_buff,len,0);
     if (res==-1){
         printf("got invalid recv\n");       //error
         free(message_buff);
@@ -131,15 +132,23 @@ struct message* get_message(int soc){
         return NULL;
     }
     printf("message is%s\n",message_buff);
+
     struct message* new_message;
-    new_message->type=(int)(message_buff[0]-'0');
+    new_message->type=message_buff[0]-'0';
+    int header_len=header_length[new_message->type];
+    
+    printf("header_len is %d\n",header_len);
     printf("message type %d\n",new_message->type);
-    new_message->payload_len=sizeof(message_buff)-header_length[new_message->type];
-    strncpy(new_message->header,&message_buff[1],header_length[new_message->type]-1);
-    //*(new_message->header+sizeof(char)*header_length[new_message->type])='\0';
-    printf("message header len is %ld\n",sizeof(char)*header_length[new_message->type]);
-    printf("message header %s\n",new_message->header);
-    strncpy(new_message->payload,&message_buff[header_length[new_message->type]],strlen(message_buff)-header_length[new_message->type]);
+    new_message->payload_len=len-header_len;
+    printf("payload_len is %d\n",new_message->payload_len);
+    
+    strncpy(new_message->header, message_buff + 1, header_len - 1);
+    new_message->header[header_len - 1] = '\0';  // Null-terminate the header
+    printf("header is %s\n",new_message->header);
+
+    strncpy(new_message->payload, message_buff + header_len, new_message->payload_len);
+    new_message->payload[new_message->payload_len] = '\0';  // Null-terminate the payload
+
     printf("message payload %s\n",new_message->payload);
     return new_message;
 }
