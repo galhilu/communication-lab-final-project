@@ -96,12 +96,14 @@ int main(){
     struct message* lb_response_ptr=get_message(lb_sock);       //wait for LB ack
     printf("got LB ack\n");
     if(lb_response_ptr==NULL){
+        free(lb_response_ptr);
         close(lb_sock);
         close(client_welcome_sock);
         return 0;
     }
     
     struct message lb_response=*lb_response_ptr;
+    free(lb_response_ptr);
     if(lb_response.type!=LB_ACK){
         printf("got invalid message type ,closing server\n");
         close(lb_sock);
@@ -140,6 +142,7 @@ int main(){
             struct message* new_message_ptr=get_message(lb_sock);
             if(new_message_ptr!=NULL){
                 struct message new_message=*new_message_ptr;
+                free(new_message_ptr);
                 printf("server got message from LB of type %d\n",new_message.type); 
                 switch (new_message.type)
                 {
@@ -179,6 +182,7 @@ int main(){
                 }
             }
             else{
+                free(new_message_ptr);
                 printf("connection with LB terminated, shuting down...\n");
                 //dealocs
                 return 0;
@@ -214,8 +218,11 @@ int main(){
                 if(FD_ISSET(clients[j],&server_sockets_loop)){
                     struct message* new_message_ptr=get_message(clients[j]);
                     if(new_message_ptr!=NULL){
+                        free(new_message_ptr);
                         struct message new_message=*new_message_ptr;
                         //add handeling for client messages and clean up on connection end
+                    }else{
+                        free(new_message_ptr);
                     }
                 }
             }

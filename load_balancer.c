@@ -121,6 +121,7 @@ void server_connection(void* soc){
     printf("in server connection\n");
     struct message* register_mssg_ptr=get_message(com_sock);
     if(register_mssg_ptr==NULL){
+        free(register_mssg_ptr);
         pthread_mutex_lock(&servers_num_mutex);
         registerd_servers.servers_num--;
         pthread_mutex_unlock(&servers_num_mutex);
@@ -128,6 +129,7 @@ void server_connection(void* soc){
         return;
     }
     struct message register_mssg=*register_mssg_ptr;
+    free(register_mssg_ptr);
     if(register_mssg.type!=SERVER_UPDATE){
         printf("got invalid register message of type %d,closing connection\n",register_mssg.type);
         close(com_sock);
@@ -191,6 +193,7 @@ void server_connection(void* soc){
             struct message* new_message_ptr=get_message(com_sock);
             if(new_message_ptr!=NULL){
                 struct message new_message=*new_message_ptr;
+                free(new_message_ptr);
                 printf("message type %d\n",new_message.type); 
                 switch (new_message.type)
                 {
@@ -229,7 +232,7 @@ void server_connection(void* soc){
                     break;
                 }
             }else
-            {
+            {   free(new_message_ptr);
                 printf("lol its Null\n");
                 running=0;
             }
@@ -296,10 +299,12 @@ int not_tried(int servers_tried[],int id){      //used in client_connection for 
 void client_connection(int com_sock){                   
     struct message* register_mssg_ptr=get_message(com_sock);
     if(register_mssg_ptr==NULL){
+        free(register_mssg_ptr);
         close(com_sock);
         return;
     }
     struct message register_mssg=*register_mssg_ptr;
+    free(register_mssg_ptr);
     if (register_mssg.type!=(char)CLIENT_REQ){
         printf("got invalid type\n");
         close(com_sock);

@@ -62,7 +62,16 @@ struct message{
 };
 
 
-
+void debug_print(char* string,int len){
+    printf("-----\n");
+    for(int i=0;i<len;i++){
+        printf("%c",string[i]);
+    }printf("\n");
+    for(int i=0;i<len;i++){
+        printf("%d ",string[i]);
+    }
+    printf("\n-----\n");
+}
 
 
 
@@ -86,12 +95,13 @@ int send_message(int sock,int type,char* header,char* payload,int payload_len){
         free(full_header);
         return -1;
     }
-    char* message=(char*)malloc((len+1) * sizeof(char));    //extra char for message length (excluding the size of the length indicator)
-    memset(message,0,(len+1) * sizeof(char));
+    char* message=(char*)malloc((len+2) * sizeof(char));    //extra char for message length (excluding the size of the length indicator)
+    memset(message,0,(len+2) * sizeof(char));
     message[0]=(char)len+'0';
     //printf("len_c is:%s\n",(char)len+'0');
     memcpy(message + 1, full_header, header_len);
     memcpy(message + 1 + header_len, payload, payload_len);
+    message[len+2]='\0';
     //strcpy(message+1,full_header);
     //strcat(message,payload);
     free(full_header);
@@ -107,7 +117,7 @@ int send_message(int sock,int type,char* header,char* payload,int payload_len){
 }
 
 
-struct message* get_message(int soc){        
+struct message* get_message(int soc){        // importent!! always remember to free the return value from this!!
     char buff[1];
     int res;
     res=recv(soc,&buff,sizeof(buff),0);  
@@ -121,7 +131,7 @@ struct message* get_message(int soc){
     
     int len = buff[0]-'0';
     printf("receiving len of %d\n",len);
-    char* message_buff=(char*)malloc((len)* sizeof(char));
+    char* message_buff=(char*)malloc((len+1)* sizeof(char));
     res=recv(soc,message_buff,len,0);
     if (res==-1){
         printf("got invalid recv\n");       //error
@@ -133,21 +143,21 @@ struct message* get_message(int soc){
     }
     printf("message is%s\n",message_buff);
 
-    struct message* new_message;
+    struct message* new_message = (struct message*)malloc(sizeof(struct message));
+
     new_message->type=message_buff[0]-'0';
     int header_len=header_length[new_message->type];
-    
     printf("header_len is %d\n",header_len);
     printf("message type %d\n",new_message->type);
-    new_message->payload_len=len-header_len;
+    new_message->payload_len=len-header_len+1;
     printf("payload_len is %d\n",new_message->payload_len);
     
     strncpy(new_message->header, message_buff + 1, header_len - 1);
     new_message->header[header_len - 1] = '\0';  // Null-terminate the header
     printf("header is %s\n",new_message->header);
-
-    strncpy(new_message->payload, message_buff + header_len, new_message->payload_len);
-    new_message->payload[new_message->payload_len] = '\0';  // Null-terminate the payload
+ 
+    strncpy(new_message->payload, message_buff + header_len, new_message->payload_len+1);
+    new_message->payload[(new_message->payload_len)] = '\0';  // Null-terminate the payload
 
     printf("message payload %s\n",new_message->payload);
     return new_message;
@@ -210,3 +220,5 @@ void splitIpPort(const char *input, char *ip_address, int *port) {
         *port = atoi(ptr);  // Convert string to integer
     }
 }
+
+

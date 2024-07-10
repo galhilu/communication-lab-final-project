@@ -84,16 +84,15 @@ void client(int start_data[]){
     //creating message to send to LB
     printf("connecting to LB: %d\n", res);
     int random_job_weight = (rand()%10)+1;
-    char temp_header[1];
-    sprintf(temp_header,"%d",random_job_weight);
-    send_message(lb_sock, CLIENT_REQ, temp_header, "", 0);
+    char header_c[1];
+    sprintf(header_c,"%d",random_job_weight);
+    send_message(lb_sock, CLIENT_REQ, header_c, "", 0);
 
     //receive message from LB
     struct message* lb_response_ptr = get_message(lb_sock);
     printf("got LB ack");
     if(lb_response_ptr == NULL){
         close(lb_sock);
-        //multicast
         clost(server_sock);
         return;
     }
@@ -101,7 +100,6 @@ void client(int start_data[]){
     if (lb_response.type != CLIENT_REQ_ACK){
         printf("got invalid message type ,closing client\n");
         close(lb_sock);
-        //multicast
 
         close(server_sock);
         return;
