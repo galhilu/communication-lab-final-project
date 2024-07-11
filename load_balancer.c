@@ -63,8 +63,8 @@ client req ack
     header: job id[1]
     payload: client welcome socket addrss[20](max)
 
-client job to server
-    description: from client to server, telling server to do a job
+client job message
+    description: from client to server and vice versa, telling server to do a job
     header: type[1] job id[1]
     payload: job[20](max) // message to print
 ----------------------------------------------------------------------------*/

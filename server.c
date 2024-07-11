@@ -192,13 +192,27 @@ int main(){
             int new_client=accept(client_welcome_sock,NULL , NULL);             
             struct message* new_message_ptr=get_message(new_client);   //need to add timeout
             if(new_message_ptr!=NULL){
-                //get first message from client
-                //look at pending jobs to verify job id is valid
-                //not valid, close connection and continue
-                //valid, put fd in clients[index of client_jobs that job id is in]
-                //add fd to fd set
-                //if new fd< max -> max=new fd
+                struct message new_message=*new_message_ptr;
+                int new_client_job_id=new_message.header[0]-'0';
+                int i;
+                for(i=0;i<5;i++){
+                    if (client_jobs[i].job_id==new_client_job_id){
+                        clients[i]=new_client;
+                        capacity=capacity+client_jobs[i].capacity;
+                    }
+                }
+                if(i==5){           //see if client is on the list
+                    close(new_client);
+                    continue;
+                }
+                FD_SET(new_client,&server_sockets); //add to fd set
+                
+                if(max_fd<new_client){              //update max fd
+                    max_fd=new_client;
+                }
+                send_message(new_client,CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
             }
+            free(new_message_ptr);
         }
         //if(FD_ISSET(multi sock,&server_sockets_loop))
             // struct message* new_message_ptr=get_message(lb_sock);
@@ -218,15 +232,35 @@ int main(){
                 if(FD_ISSET(clients[j],&server_sockets_loop)){
                     struct message* new_message_ptr=get_message(clients[j]);
                     if(new_message_ptr!=NULL){
-                        free(new_message_ptr);
                         struct message new_message=*new_message_ptr;
-                        //add handeling for client messages and clean up on connection end
-                    }else{
-                        free(new_message_ptr);
+                        if(client_jobs[j].capacity*10>new_message.payload_len){
+                            printf("client's message excceded allocated capacity. bad client! right to jail!\n");
+                            close(clients[j]);
+                            client_jobs[j].job_id=-1;
+                            capacity=capacity+client_jobs[j].capacity;
+                            break;
+                        }
+                        if(new_message.payload=="close"){
+                            printf("client is done, closing connection");
+                            close(clients[j]);
+                            client_jobs[j].job_id=-1;
+                            capacity=capacity+client_jobs[j].capacity;
+                            break;
+                        }
+                        send_message(clients[j],CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
                     }
+                    free(new_message_ptr);
                 }
             }
         }
+
+        for(int i=0;i<5;i++){       //deallocate capacity for clients that didnt make contact in 5 secondes
+            if (client_jobs[i].job_id!=-1 && time(NULL)-client_jobs[i].timestamp>5 && clients[i]!=-1){
+                client_jobs[i].job_id=-1;
+                capacity=capacity+client_jobs[i].capacity;
+            }
+        }
+    
 
     }
 
