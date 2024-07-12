@@ -59,14 +59,14 @@ job ack
 
 client req ack
     description: from LB to client, sent to tell client where server is at for the job asked
-    type[1]
-    header: job id[1]
+    
+    header:type[1] job id[1]
     payload: client welcome socket addrss[20](max)
 
 client job message
     description: from client to server and vice versa, telling server to do a job
     header: type[1] job id[1]
-    payload: job[20](max) // message to print
+    payload: job[capacity*10](max)
 ----------------------------------------------------------------------------*/
 
 //constants
@@ -185,7 +185,7 @@ void server_connection(void* soc){
     {   server_rec_loop=server_rec;
         
         
-        printf("server select %d\n",select(server.comm_soc+1,&server_rec_loop,NULL,NULL,&tv));
+        select(server.comm_soc+1,&server_rec_loop,NULL,NULL,&tv);
         //printf("melm %d\n",FD_ISSET(com_sock,&server_rec));
         tv.tv_sec=1;
         if(FD_ISSET(com_sock,&server_rec_loop)){
@@ -194,7 +194,7 @@ void server_connection(void* soc){
             if(new_message_ptr!=NULL){
                 struct message new_message=*new_message_ptr;
                 free(new_message_ptr);
-                printf("message type %d\n",new_message.type); 
+                //printf("message type %d\n",new_message.type); 
                 switch (new_message.type)
                 {
                 case SERVER_UPDATE:
@@ -208,16 +208,19 @@ void server_connection(void* soc){
                     break;
                 
                 case JOB_ACK:
+                    printf("got job ack!!\n");
                     pthread_mutex_lock(&job_confirmation_list_mutex);
                     for(i=0;i<JOB_CONF_LEN;i++){
                         if(job_confirmation_list[i].req_id==0){
-                            job_confirmation_list[i].req_id=new_message.header[1];
+                            job_confirmation_list[i].req_id=new_message.header[0]-'0';
                             job_confirmation_list[i].server_id=server.id;
-                            job_confirmation_list[i].answer=new_message.payload[1];
+                            job_confirmation_list[i].answer=new_message.payload[0]-'0';
                             job_confirmation_list[i].time=time(NULL);
                             pthread_mutex_lock(&registerd_servers_mutex[server_index]);
                             strcpy(job_confirmation_list[i].client_sock,registerd_servers.servers[server_index].client_sock);
                             pthread_mutex_unlock(&registerd_servers_mutex[server_index]);
+                            printf("i put it in id %d\n",i);
+                            printf("the answer is %d\n",new_message.payload[0]-'0');
                             break;
                         }
                     }
@@ -296,13 +299,15 @@ int not_tried(int servers_tried[],int id){      //used in client_connection for 
     return 1; //true
 }
 
-void client_connection(int com_sock){                   
+void client_connection( void* soc){          
+    int com_sock=*(int*)soc;
     struct message* register_mssg_ptr=get_message(com_sock);
     if(register_mssg_ptr==NULL){
         free(register_mssg_ptr);
         close(com_sock);
         return;
     }
+    
     struct message register_mssg=*register_mssg_ptr;
     free(register_mssg_ptr);
     if (register_mssg.type!=(char)CLIENT_REQ){
@@ -310,7 +315,8 @@ void client_connection(int com_sock){
         close(com_sock);
         return;
     }
-    int capacity=register_mssg.header[1];
+    int capacity=register_mssg.header[0]-'0';
+    printf("got capacity of:%d\n",capacity); 
     if (capacity<=0){
         printf("got invalid capacity\n");
         close(com_sock);
@@ -329,26 +335,32 @@ void client_connection(int com_sock){
         server_cap=0;
         server_index=-1;
         for(i=0;i<MAX_SERVERS;i++){             //find next server to ask to do job
-            if(server_cap<registerd_servers.servers[i].capacity && not_tried(servers_tried,i)){
+            printf("%d\n",server_cap<registerd_servers.servers[i].capacity);
+            if(server_cap<registerd_servers.servers[i].capacity && not_tried(servers_tried,registerd_servers.servers[i].id)){
+                printf("got a server\n");
                 server_cap=registerd_servers.servers[i].capacity;
+                server_id=registerd_servers.servers[i].id;
                 server_index=i;
             }
-    }
+    }   printf("server_cap:%d server_index:%d server_id:%d\n",server_cap,server_index,server_id);
         if(server_cap<capacity || server_index==-1){
             printf("no valid server found\n");
             close(com_sock);
             return;
     }
-        servers_tried[j]=server_index;
+        servers_tried[j]=server_id;
         char payload[]="please do this job";
         int res;
         int not_rejected=1;
         char header[LB_JOB_H_LEN];
-        char* temp;
-        sprintf(temp,"%d",capacity);
-        strcpy(header,temp);
-        sprintf(temp,"%d",job_id);
-        strcat(header,temp);
+        char capacity_c[2],my_job_id_c[2];
+        sprintf(capacity_c,"%d",capacity);
+        sprintf(my_job_id_c,"%d",my_job_id);
+        strcpy(header,capacity_c);
+        strcat(header,my_job_id_c);
+        my_job_id_c[1]='\0';
+        capacity_c[1]='\0';
+        printf("im sending job of number:%d %s\n",my_job_id,my_job_id_c);
         res=send_message(registerd_servers.servers[server_index].comm_soc,LB_JOB,header,payload,sizeof(payload));
         if(res==-1){
             printf("couldnt contact server, trying diffrent one\n");
@@ -358,37 +370,40 @@ void client_connection(int com_sock){
         
         while(time(NULL)-timer<5 && not_rejected){
             usleep(100000); //sleep 0.1 sec
-            for(i=0;i<JOB_CONF_LEN;i++){
-                if(job_confirmation_list[i].req_id==my_job_id){
-                 
-                    if(job_confirmation_list[i].answer==1){
+            for(int j=0;j<JOB_CONF_LEN;j++){
+                if(job_confirmation_list[j].req_id==my_job_id){
+                    printf("found my job id in conformation list\n");
+                    if(job_confirmation_list[j].answer==1){
                         char payload[20];   //contains servers welcome socket address
-                        strcpy(payload,job_confirmation_list[i].client_sock);
-                        res=send_message(com_sock,CLIENT_REQ_ACK,temp,payload,sizeof(payload));
+                        strcpy(payload,job_confirmation_list[j].client_sock);
+                        payload[strlen(job_confirmation_list[j].client_sock)]='\0';
+                        printf("the socket is:%s\n",payload);
+                        printf("im sending job of number:%c\n",my_job_id_c[0]);
+                        res=send_message(com_sock,CLIENT_REQ_ACK,my_job_id_c,payload,sizeof(payload));
                         if(res==-1){
                             printf("couldnt contact client, close connection\n");
                             close(com_sock);
                             return;
                         }
                         pthread_mutex_lock(&job_confirmation_list_mutex);
-                        strcat(job_confirmation_list[i].client_sock,"");
-                        job_confirmation_list[i].req_id=0;
-                        job_confirmation_list[i].server_id=0;
-                        job_confirmation_list[i].time=0;
+                        strcat(job_confirmation_list[j].client_sock,"");
+                        job_confirmation_list[j].req_id=0;
+                        job_confirmation_list[j].server_id=0;
+                        job_confirmation_list[j].time=0;
                         pthread_mutex_unlock(&job_confirmation_list_mutex);
-                        printf("job number %d was handeld\n",job_id);
+                        printf("job number %d was handeld\n",my_job_id);
                         close(com_sock); 
                         return;
-                    }else if (job_confirmation_list[i].answer==0)
+                    }else if (job_confirmation_list[j].answer==0)
                     {
                         not_rejected=0;             //got rejection, try new server
                         pthread_mutex_lock(&job_confirmation_list_mutex);
-                        strcat(job_confirmation_list[i].client_sock,"");
-                        job_confirmation_list[i].req_id=0;
-                        job_confirmation_list[i].server_id=0;
-                        job_confirmation_list[i].time=0;
+                        strcat(job_confirmation_list[j].client_sock,"");
+                        job_confirmation_list[j].req_id=0;
+                        job_confirmation_list[j].server_id=0;
+                        job_confirmation_list[j].time=0;
                         pthread_mutex_unlock(&job_confirmation_list_mutex);
-                        printf("server %d rejected job %d \n",job_id,registerd_servers.servers[server_index].id);
+                        printf("server %d rejected job %d \n",my_job_id,registerd_servers.servers[server_index].id);
                     }
                     
                     
@@ -486,7 +501,7 @@ int main() {
             // FD_SET(client_welcom_socket,&welcome_sockets);
             // FD_SET(server_welcom_socket,&welcome_sockets);
 
-            printf("%d\n",select(max+1,&welcome_sockets_loop,NULL,NULL,&select_timeout));       //maby neet to change to max
+            select(max+1,&welcome_sockets_loop,NULL,NULL,&select_timeout);       //maby neet to change to max
             select_timeout.tv_sec=1;
             if(FD_ISSET(server_welcom_socket,&welcome_sockets_loop)){
                 socklen_t addr_len;             
@@ -520,27 +535,17 @@ int main() {
                 pthread_t client_thread;
                 pthread_create(&client_thread,NULL,(void*)&client_connection,(void*) &new_client);
                 }
-
-            // if(listen(client_welcom_socket,1)>0){                           //need to make sure that returns num of waiting and not 0 for sucsses in non blocking
-            //     socklen_t addr_len;
-            //     addr_len = sizeof(client_soc_Addr);
-            //     int new_client=accept(client_welcom_socket,(struct sockaddr*)&client_soc_Addr , &addr_len);
-            //     struct timeval tv;
-            //     tv.tv_sec = FIRST_MSSG_TIMEOUT;
-            //     tv.tv_usec = 0;
-            //     setsockopt(new_client, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
-            //     pthread_t client_thread;
-            //     pthread_create(&client_thread,NULL,(void*)&client_connection,(void*)&new_client);
-            //     }
             
             if (time(NULL)-update_timer>=5){
+                printf("sending multicast update req\n");
                 for(i=0;i<MAX_SERVERS;i++){
                     registerd_servers.servers[i].updated=0;
                 }
                 //send multicast update requst
                 update_timer=time(NULL);
             }
-            if (time(NULL)-job_conf_clean_timer>=1){
+            if (time(NULL)-job_conf_clean_timer>=5){            //put back to 1 
+                printf("cleaning up job conformation list\n");
                 pthread_mutex_lock(&job_confirmation_list_mutex);
                 for(i=0;i<JOB_CONF_LEN;i++){
                     if(job_confirmation_list[i].req_id!=0 && time(NULL)-job_confirmation_list[i].time>5){

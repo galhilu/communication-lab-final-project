@@ -77,18 +77,23 @@ void debug_print(char* string,int len){
 
 int send_message(int sock,int type,char* header,char* payload,int payload_len){
     int header_len=header_length[type];
-    char* full_header=(char*)malloc(header_len);
-    memset(full_header,0,header_len);
+    
+    char* full_header=(char*)malloc(header_len+1);
+    if (full_header==NULL){
+        printf("full_header malloc fail\n");
+        return -1;
+    }
+    memset(full_header,0,header_len+1);
     int len=(header_len+payload_len) * sizeof(char);
+    
     char type_c[2];     //is 2 only to stop warnings, will always be 1 char long
     sprintf(type_c,"%d",type);
-    printf("type:%s\n",type_c);
-    printf("full_header is :%s\n",full_header);
+    type_c[1]='\0';
+    
     strncpy(full_header,type_c,1);         //construct header
-    printf("full_header is :%s\n",full_header);
     strncpy(full_header+1,header,header_len-1);
-    printf("full_header is :%s\n",full_header);
-
+    full_header[header_len]='\0';
+    
     printf("want to send %d bytes long message\n",len);
     if (len>127){       //max len is 127 (can fit in char)
         printf("message length exeeded, max len is 127byte tried to send:%dbytes\n",len);
@@ -98,19 +103,15 @@ int send_message(int sock,int type,char* header,char* payload,int payload_len){
     char* message=(char*)malloc((len+2) * sizeof(char));    //extra char for message length (excluding the size of the length indicator)
     memset(message,0,(len+2) * sizeof(char));
     message[0]=(char)len+'0';
-    //printf("len_c is:%s\n",(char)len+'0');
+
     memcpy(message + 1, full_header, header_len);
     memcpy(message + 1 + header_len, payload, payload_len);
-    message[len+2]='\0';
-    //strcpy(message+1,full_header);
-    //strcat(message,payload);
-    free(full_header);
-    int res;
-    printf("sent:%s\n",message);
-    printf("ofsize:%ld\n",strlen(message));
+    message[len+1]='\0';
 
-    res=send(sock,message,len+1,0);
-    printf("send res= %d\n",res);
+    printf("sent:%s\n",message);
+    int res=send(sock,message,len+1,0);
+
+    free(full_header);
     free(message);
     return res;
 
@@ -121,7 +122,7 @@ struct message* get_message(int soc){        // importent!! always remember to f
     char buff[1];
     int res;
     res=recv(soc,&buff,sizeof(buff),0);  
-    printf("len buff is:%s\n",buff);     
+    //printf("len buff is:%s\n",buff);     
     if (res <= 0) {  // Handle error or timeout
         if (res == -1) {
             perror("error: ");
@@ -147,19 +148,19 @@ struct message* get_message(int soc){        // importent!! always remember to f
 
     new_message->type=message_buff[0]-'0';
     int header_len=header_length[new_message->type];
-    printf("header_len is %d\n",header_len);
+    //printf("header_len is %d\n",header_len);
     printf("message type %d\n",new_message->type);
     new_message->payload_len=len-header_len+1;
-    printf("payload_len is %d\n",new_message->payload_len);
+    //printf("payload_len is %d\n",new_message->payload_len);
     
     strncpy(new_message->header, message_buff + 1, header_len - 1);
     new_message->header[header_len - 1] = '\0';  // Null-terminate the header
-    printf("header is %s\n",new_message->header);
+    //printf("header is %s\n",new_message->header);
  
     strncpy(new_message->payload, message_buff + header_len, new_message->payload_len+1);
     new_message->payload[(new_message->payload_len)] = '\0';  // Null-terminate the payload
 
-    printf("message payload %s\n",new_message->payload);
+    //printf("message payload %s\n",new_message->payload);
     return new_message;
 }
 
@@ -198,27 +199,6 @@ int createWelcomeSocket(int port, int maxClient){
         return -1;
     }
     return serverSocket;
-}
-
-void splitIpPort(const char *input, char *ip_address, int *port) {
-	char input_copy[21];  // Maximum length is 20 + 1 for null terminator
-    strncpy(input_copy, input, sizeof(input_copy));
-    input_copy[sizeof(input_copy) - 1] = '\0';  // Ensure null-terminated
-
-    // Tokenize the input string using strtok
-    char *ptr = strtok(input_copy, ":");
-
-    // First token is the IP address
-    if (ptr != NULL) {
-        strncpy(ip_address, ptr, 16);  // Assuming maximum length of IP address is 15 characters
-        ip_address[15] = '\0';  // Ensure null-terminated
-    }
-
-    // Second token is the port number
-    ptr = strtok(NULL, ":");
-    if (ptr != NULL) {
-        *port = atoi(ptr);  // Convert string to integer
-    }
 }
 
 

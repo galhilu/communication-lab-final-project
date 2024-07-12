@@ -135,8 +135,9 @@ int main(){
     while (running)
     { 
         server_sockets_loop=server_sockets;
-        printf("%d\n",select(max_fd+1,&server_sockets_loop,NULL,NULL,&select_timeout));       //maby neet to change to max
+        select(max_fd+1,&server_sockets_loop,NULL,NULL,&select_timeout);       //maby neet to change to max
         select_timeout.tv_sec=1;
+        printf("my cap is:%d\n",capacity);
         
         if(FD_ISSET(lb_sock,&server_sockets_loop)){
             struct message* new_message_ptr=get_message(lb_sock);
@@ -151,32 +152,44 @@ int main(){
                         send_message(lb_sock,SERVER_UPDATE,&capacity_c[0],client_sock_addr,strlen(client_sock_addr));
                         break;
                     case LB_JOB:
+                    printf("got job message\n");
                         char job_cap=new_message.header[0];
+                        printf("the cap is %c\n",job_cap);
                         if(job_cap<'0'||job_cap>'9'){
                             printf("got bad capacity for job: %c discarding",job_cap);
                         }
                         else{
-                            char respons_header=new_message.header[1]; //job id
-                            char job_ans;
-                            if(job_cap>capacity+'0'){
+                            char job_id[2]; //job id
+                            job_id[0]=new_message.header[1];
+                            job_id[1]='\0';
+                            //printf("the id is %c\n",job_id);
+                            char job_ans[2];
+                            if(job_cap<capacity+'0'){
+                                printf("good cap\n");
                                 int i;
                                 for( i=0;i<5;i++){       //set aside a place for client
                                     if(client_jobs[i].job_id==-1){
+                                        printf("found a spot in %d\n",i);
                                         client_jobs[i].job_id=new_message.header[1]-'0';
                                         client_jobs[i].timestamp=time(NULL);
-                                        job_ans='1'; //accept
+                                        client_jobs[i].capacity=job_cap-'0';
+                                        job_ans[0]='1'; //accept
                                         capacity=capacity-(job_cap-'0');
                                         break;
                                     }
                                 }
                                 if(i==5){
-                                    job_ans='0'; //reject
+                                    printf("too many clients\n");
+                                    job_ans[0]='0'; //reject
                                 }
 
                             }else{
-                                job_ans='0'; //reject
+                                printf("too high cap\n");
+                                job_ans[0]='0'; //reject
                             }
-                            send_message(lb_sock,JOB_ACK,&respons_header,client_sock_addr,strlen(client_sock_addr));
+                            job_ans[1]='\0';
+                            printf("my answer is %s\n",job_ans);
+                            send_message(lb_sock,JOB_ACK,job_id,job_ans,strlen(job_ans));
                         }   
                         break;
                 }
@@ -189,6 +202,7 @@ int main(){
             }
         }
         if(FD_ISSET(client_welcome_sock,&server_sockets_loop)){
+            printf("got first message from a client!!!\n");
             int new_client=accept(client_welcome_sock,NULL , NULL);             
             struct message* new_message_ptr=get_message(new_client);   //need to add timeout
             if(new_message_ptr!=NULL){
@@ -199,6 +213,7 @@ int main(){
                     if (client_jobs[i].job_id==new_client_job_id){
                         clients[i]=new_client;
                         capacity=capacity+client_jobs[i].capacity;
+                        break;
                     }
                 }
                 if(i==5){           //see if client is on the list
@@ -210,6 +225,7 @@ int main(){
                 if(max_fd<new_client){              //update max fd
                     max_fd=new_client;
                 }
+                printf("sending back to client\n");
                 send_message(new_client,CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
             }
             free(new_message_ptr);
@@ -230,24 +246,29 @@ int main(){
         for(int j=0;j<5;j++){       //set aside a place for client
             if(clients[j]!=-1){
                 if(FD_ISSET(clients[j],&server_sockets_loop)){
+                    //printf("got more client messages\n");
                     struct message* new_message_ptr=get_message(clients[j]);
                     if(new_message_ptr!=NULL){
                         struct message new_message=*new_message_ptr;
-                        if(client_jobs[j].capacity*10>new_message.payload_len){
-                            printf("client's message excceded allocated capacity. bad client! right to jail!\n");
+                        if(client_jobs[j].capacity*10<new_message.payload_len){
+                            printf("client's message excceded allocated capacity. bad client! right to jail! %d\n",new_message.payload_len);
+                            printf("ok len is %d max\n",client_jobs[j].capacity*10);
                             close(clients[j]);
                             client_jobs[j].job_id=-1;
                             capacity=capacity+client_jobs[j].capacity;
                             break;
                         }
-                        if(new_message.payload=="close"){
+                        if(strcmp(new_message.payload,"close")==0){
                             printf("client is done, closing connection");
                             close(clients[j]);
                             client_jobs[j].job_id=-1;
                             capacity=capacity+client_jobs[j].capacity;
+                            FD_CLR(clients[j],&server_sockets);
                             break;
+                        }else{
+                            send_message(clients[j],CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
                         }
-                        send_message(clients[j],CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
+                        
                     }
                     free(new_message_ptr);
                 }
