@@ -16,7 +16,6 @@
 //adresses
 #define CLIENT_PORT 6500
 #define SERVER_PORT 8700
-#define MULTY_IP    "224.0.0.1"
 
 // load balancer states
 #define START 1
@@ -60,7 +59,10 @@ struct message{
     char payload[127-3];//make sure header + payload=127
     int payload_len;
 };
-
+struct address{
+    char ip[16];
+    int port;
+};
 
 void debug_print(char* string,int len){
     printf("-----\n");
@@ -86,7 +88,7 @@ int send_message(int sock,int type,char* header,char* payload,int payload_len){
     memset(full_header,0,header_len+1);
     int len=(header_len+payload_len) * sizeof(char);
     
-    char type_c[2];     //is 2 only to stop warnings, will always be 1 char long
+    char type_c[2];     
     sprintf(type_c,"%d",type);
     type_c[1]='\0';
     
@@ -94,7 +96,6 @@ int send_message(int sock,int type,char* header,char* payload,int payload_len){
     strncpy(full_header+1,header,header_len-1);
     full_header[header_len]='\0';
     
-    printf("want to send %d bytes long message\n",len);
     if (len>127){       //max len is 127 (can fit in char)
         printf("message length exeeded, max len is 127byte tried to send:%dbytes\n",len);
         free(full_header);
@@ -108,7 +109,7 @@ int send_message(int sock,int type,char* header,char* payload,int payload_len){
     memcpy(message + 1 + header_len, payload, payload_len);
     message[len+1]='\0';
 
-    printf("sent:%s\n",message);
+    printf("sent message:%s\n",message);
     int res=send(sock,message,len+1,0);
 
     free(full_header);
@@ -122,7 +123,6 @@ struct message* get_message(int soc){        // importent!! always remember to f
     char buff[1];
     int res;
     res=recv(soc,&buff,sizeof(buff),0);  
-    //printf("len buff is:%s\n",buff);     
     if (res <= 0) {  // Handle error or timeout
         if (res == -1) {
             perror("error: ");
@@ -131,7 +131,6 @@ struct message* get_message(int soc){        // importent!! always remember to f
     }
     
     int len = buff[0]-'0';
-    printf("receiving len of %d\n",len);
     char* message_buff=(char*)malloc((len+1)* sizeof(char));
     res=recv(soc,message_buff,len,0);
     if (res==-1){
@@ -142,26 +141,45 @@ struct message* get_message(int soc){        // importent!! always remember to f
         printf("timeout reciving\n");       //time out
         return NULL;
     }
-    printf("message is%s\n",message_buff);
+    printf("recieved a message: %s\n",message_buff);
 
     struct message* new_message = (struct message*)malloc(sizeof(struct message));
 
     new_message->type=message_buff[0]-'0';
     int header_len=header_length[new_message->type];
-    //printf("header_len is %d\n",header_len);
+
     printf("message type %d\n",new_message->type);
     new_message->payload_len=len-header_len+1;
-    //printf("payload_len is %d\n",new_message->payload_len);
-    
     strncpy(new_message->header, message_buff + 1, header_len - 1);
     new_message->header[header_len - 1] = '\0';  // Null-terminate the header
-    //printf("header is %s\n",new_message->header);
- 
     strncpy(new_message->payload, message_buff + header_len, new_message->payload_len+1);
     new_message->payload[(new_message->payload_len)] = '\0';  // Null-terminate the payload
 
-    //printf("message payload %s\n",new_message->payload);
     return new_message;
+}
+
+
+struct address* address_parsing(char* address_string){
+    int i;
+    struct address* parsed_address = (struct address*)malloc(sizeof(struct address));
+    for(i=0;i<strlen(address_string);i++){
+        if(address_string[i]==':'){
+            strncpy(parsed_address->ip,address_string,i);
+            parsed_address->ip[i]='\0';
+            char port_c[6];
+            strcpy(port_c,address_string+i+1);
+            port_c[5]='\0';
+            parsed_address->port=atoi(port_c);
+            break;
+        }
+    }
+    if(i==strlen(address_string)){
+        printf("i got invalid addres parsing. deallocating and going to cry in the corner...\n");
+        free(parsed_address);
+        return NULL;
+    }
+    return parsed_address;
+
 }
 
 
@@ -199,6 +217,27 @@ int createWelcomeSocket(int port, int maxClient){
         return -1;
     }
     return serverSocket;
+}
+
+char* get_my_ip(){
+    static char ip[INET_ADDRSTRLEN];
+    struct ifaddrs *ifaddr, *ifa;
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs");
+        exit(EXIT_FAILURE);
+    }
+
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL)
+            continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+            inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
+        }
+    }
+    return ip;
+
 }
 
 

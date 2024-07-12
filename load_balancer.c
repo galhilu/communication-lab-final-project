@@ -15,7 +15,9 @@
 //adresses
 #define CLIENT_PORT 6500
 #define SERVER_PORT 8700
-#define MULTY_IP    "224.0.0.1"
+#define MULTY_IP    "239.0.0.1"
+#define MULTY_PORT    12345
+#define MULTY_ADDR    "239.0.0.1:12345"
 
 // load balancer states
 #define START 1
@@ -31,12 +33,12 @@
 LB job
     description: from a client connection thread to a server, attempting to assign a job
     header: type[1]capacity[1]job id[1]
-    payload:
+    payload:    
 
 LB update
-    description: sent from LB in multicast, asking for updates from all servers
+    description: sent from LB in multicast, asking for updates from all servers this message is of static length
     header: type[1]
-    payload: 
+    payload: no payload
 
 server update
     description: sent from a server to LB, as registration message and after LB asked for an update
@@ -135,8 +137,8 @@ void server_connection(void* soc){
         close(com_sock);
         return;
     }
-    char lb_ack_payload[15];
-    strcpy(lb_ack_payload,MULTY_IP);
+    char lb_ack_payload[strlen(MULTY_ADDR)];
+    strcpy(lb_ack_payload,MULTY_ADDR);
     send_message(com_sock,LB_ACK,"",lb_ack_payload,sizeof(lb_ack_payload));             //send LB ack to server with multicast addr
     
     struct server_data server;
@@ -179,14 +181,12 @@ void server_connection(void* soc){
     fd_set server_rec,server_rec_loop;
     FD_ZERO(&server_rec);
     FD_SET(server.comm_soc,&server_rec);
-    //FD_ZERO(&server_rec);
     printf("server of id %d was registered\n",server.id);
     while (running)
     {   server_rec_loop=server_rec;
         
         
         select(server.comm_soc+1,&server_rec_loop,NULL,NULL,&tv);
-        //printf("melm %d\n",FD_ISSET(com_sock,&server_rec));
         tv.tv_sec=1;
         if(FD_ISSET(com_sock,&server_rec_loop)){
             printf("LB got message from server %d\n",server.id); 
@@ -194,7 +194,6 @@ void server_connection(void* soc){
             if(new_message_ptr!=NULL){
                 struct message new_message=*new_message_ptr;
                 free(new_message_ptr);
-                //printf("message type %d\n",new_message.type); 
                 switch (new_message.type)
                 {
                 case SERVER_UPDATE:
@@ -208,7 +207,6 @@ void server_connection(void* soc){
                     break;
                 
                 case JOB_ACK:
-                    printf("got job ack!!\n");
                     pthread_mutex_lock(&job_confirmation_list_mutex);
                     for(i=0;i<JOB_CONF_LEN;i++){
                         if(job_confirmation_list[i].req_id==0){
@@ -219,8 +217,7 @@ void server_connection(void* soc){
                             pthread_mutex_lock(&registerd_servers_mutex[server_index]);
                             strcpy(job_confirmation_list[i].client_sock,registerd_servers.servers[server_index].client_sock);
                             pthread_mutex_unlock(&registerd_servers_mutex[server_index]);
-                            printf("i put it in id %d\n",i);
-                            printf("the answer is %d\n",new_message.payload[0]-'0');
+                            printf("got job ack from server %d, it was put in confirmation list spot %d \n",server.id,i);
                             break;
                         }
                     }
@@ -236,7 +233,7 @@ void server_connection(void* soc){
                 }
             }else
             {   free(new_message_ptr);
-                printf("lol its Null\n");
+                printf("lol got Null\n");
                 running=0;
             }
         }
@@ -284,7 +281,7 @@ void server_connection(void* soc){
     registerd_servers.servers_num--;
     pthread_mutex_unlock(&servers_num_mutex);
     close(server.comm_soc);
-    printf("server %d is dead \n",server.id);
+    printf("server %d is dead. press F to pay respect.\n",server.id);
     pthread_exit(0);
     return;
 };
@@ -337,17 +334,18 @@ void client_connection( void* soc){
         for(i=0;i<MAX_SERVERS;i++){             //find next server to ask to do job
             printf("%d\n",server_cap<registerd_servers.servers[i].capacity);
             if(server_cap<registerd_servers.servers[i].capacity && not_tried(servers_tried,registerd_servers.servers[i].id)){
-                printf("got a server\n");
                 server_cap=registerd_servers.servers[i].capacity;
                 server_id=registerd_servers.servers[i].id;
                 server_index=i;
             }
-    }   printf("server_cap:%d server_index:%d server_id:%d\n",server_cap,server_index,server_id);
+        }
         if(server_cap<capacity || server_index==-1){
             printf("no valid server found\n");
             close(com_sock);
             return;
-    }
+        }
+        printf("asking server %d to do job number %d\n",registerd_servers.servers[i].id,my_job_id);
+
         servers_tried[j]=server_id;
         char payload[]="please do this job";
         int res;
@@ -360,7 +358,7 @@ void client_connection( void* soc){
         strcat(header,my_job_id_c);
         my_job_id_c[1]='\0';
         capacity_c[1]='\0';
-        printf("im sending job of number:%d %s\n",my_job_id,my_job_id_c);
+
         res=send_message(registerd_servers.servers[server_index].comm_soc,LB_JOB,header,payload,sizeof(payload));
         if(res==-1){
             printf("couldnt contact server, trying diffrent one\n");
@@ -368,32 +366,31 @@ void client_connection( void* soc){
         }
         timer=time(NULL);
         
-        while(time(NULL)-timer<5 && not_rejected){
+        while(time(NULL)-timer<5 && not_rejected){      //look for a job ack for 5 seconds
             usleep(100000); //sleep 0.1 sec
             for(int j=0;j<JOB_CONF_LEN;j++){
                 if(job_confirmation_list[j].req_id==my_job_id){
-                    printf("found my job id in conformation list\n");
+                    printf("found my job id in conformation list in spot: %d\n",j);
                     if(job_confirmation_list[j].answer==1){
                         char payload[20];   //contains servers welcome socket address
                         strcpy(payload,job_confirmation_list[j].client_sock);
                         payload[strlen(job_confirmation_list[j].client_sock)]='\0';
-                        printf("the socket is:%s\n",payload);
-                        printf("im sending job of number:%c\n",my_job_id_c[0]);
                         res=send_message(com_sock,CLIENT_REQ_ACK,my_job_id_c,payload,sizeof(payload));
                         if(res==-1){
                             printf("couldnt contact client, close connection\n");
                             close(com_sock);
                             return;
                         }
+                        printf("job number %d was handeld by server number %d\n",my_job_id,job_confirmation_list[j].server_id);
                         pthread_mutex_lock(&job_confirmation_list_mutex);
                         strcat(job_confirmation_list[j].client_sock,"");
                         job_confirmation_list[j].req_id=0;
                         job_confirmation_list[j].server_id=0;
                         job_confirmation_list[j].time=0;
                         pthread_mutex_unlock(&job_confirmation_list_mutex);
-                        printf("job number %d was handeld\n",my_job_id);
                         close(com_sock); 
                         return;
+                        
                     }else if (job_confirmation_list[j].answer==0)
                     {
                         not_rejected=0;             //got rejection, try new server
@@ -412,8 +409,9 @@ void client_connection( void* soc){
             
         }
     }
-    printf("cant find server for job %d, rejecting job\n",job_id);
+    printf("cant find server for job %d, shooing client away.\n",my_job_id);
     close(com_sock);
+    pthread_exit(0);
     return;
 }
 
@@ -439,11 +437,25 @@ int main() {
     printf("ip%d\n",server_soc_Addr.sin_addr.s_addr);
     res=bind(server_welcom_socket, (struct sockaddr*)&server_soc_Addr , sizeof(server_soc_Addr));
     listen(server_welcom_socket,5);
+    
+    int multycast_socket = socket(AF_INET, SOCK_DGRAM, 0);  //multicast socket 
+    struct sockaddr_in multy_addr;
+    multy_addr.sin_family = AF_INET;
+    multy_addr.sin_addr.s_addr = inet_addr(MULTY_IP);
+    multy_addr.sin_port = htons(MULTY_PORT);
+
+    char mssg_payload[]="";    //message constraction
+    char multycast_mssg[strlen(mssg_payload)+3];   //3 for len,type and \0
+    int len=strlen(mssg_payload)+2;
+    multycast_mssg[0]=len+'0';
+    multycast_mssg[1]=LB_UPDATE+'0';
+    strncpy(multycast_mssg+2,mssg_payload,strlen(mssg_payload));
+    multycast_mssg[strlen(mssg_payload)+2]='\0';
+    
     FD_ZERO(&welcome_sockets);
     FD_SET(client_welcom_socket,&welcome_sockets);
-
     FD_SET(server_welcom_socket,&welcome_sockets);
-    //create multicast port
+
     time_t update_timer;
     time_t job_conf_clean_timer;
     struct timeval select_timeout;
@@ -496,13 +508,11 @@ int main() {
             state=LISTENING;
 
         case LISTENING:
-            welcome_sockets_loop=welcome_sockets;
-            //FD_ZERO(&welcome_sockets_loop);
-            // FD_SET(client_welcom_socket,&welcome_sockets);
-            // FD_SET(server_welcom_socket,&welcome_sockets);
 
+            welcome_sockets_loop=welcome_sockets;
             select(max+1,&welcome_sockets_loop,NULL,NULL,&select_timeout);       //maby neet to change to max
             select_timeout.tv_sec=1;
+
             if(FD_ISSET(server_welcom_socket,&welcome_sockets_loop)){
                 socklen_t addr_len;             
                 addr_len = sizeof(server_soc_Addr);
@@ -525,7 +535,7 @@ int main() {
             }
 
             if(FD_ISSET(client_welcom_socket,&welcome_sockets_loop)){
-                socklen_t addr_len;              //need to make sure that returns num of waiting and not 0 for sucsses in non blocking
+                socklen_t addr_len;              
                 addr_len = sizeof(client_soc_Addr);
                 int new_client=accept(client_welcom_socket,(struct sockaddr*)&client_soc_Addr , &addr_len);
                 struct timeval tv;
@@ -537,14 +547,15 @@ int main() {
                 }
             
             if (time(NULL)-update_timer>=5){
-                printf("sending multicast update req\n");
+                
                 for(i=0;i<MAX_SERVERS;i++){
                     registerd_servers.servers[i].updated=0;
                 }
-                //send multicast update requst
+                res=sendto(multycast_socket, multycast_mssg, strlen(multycast_mssg), 0, (struct sockaddr*)&multy_addr, sizeof(multy_addr));
+                printf("sending multicast update req sent:%d\n",res);
                 update_timer=time(NULL);
             }
-            if (time(NULL)-job_conf_clean_timer>=5){            //put back to 1 
+            if (time(NULL)-job_conf_clean_timer>=2){
                 printf("cleaning up job conformation list\n");
                 pthread_mutex_lock(&job_confirmation_list_mutex);
                 for(i=0;i<JOB_CONF_LEN;i++){

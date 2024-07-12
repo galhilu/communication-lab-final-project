@@ -12,10 +12,8 @@
 #include <ifaddrs.h>
 
 
-#define BASE_PORT 1100
-#define LB_IP "127.0.0.1"             //change to fit for each run
 #define LB_PORT 6500
-#define MESSAGE_COUNT_TO_SERVER 2
+#define MESSAGE_COUNT_TO_SERVER 10
 
 int send_message(int sock, int type, char* header, char* payload, int payload_len);
 void splitIpPort(const char *input, char *ip_address, int *port);
@@ -24,55 +22,52 @@ struct message* get_message(int soc);
 
 
 
-void main(){
+void main(int argc, char *argv[]){
+    if(argc!=4){
+        printf("arguments are: LB ip, capacity(one digit), local port\n");
+        return;
+    }
+    char lb_ip[16];
+    strncpy(lb_ip,argv[1],15);
+    lb_ip[15]=
+    printf("lb_ip%s\n",lb_ip);
+    int capacity=atoi(argv[2]);
+    int base_port=atoi(argv[3]);
+    printf("cap:%d\n",capacity);
+    printf("base_port%d\n",base_port);
     int res;
 
-    // get IP for self
-    struct ifaddrs *ifaddr, *ifa;
-    char ip[INET_ADDRSTRLEN];
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        exit(EXIT_FAILURE);
-    }
-
-    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == NULL)
-            continue;
-
-        if (ifa->ifa_addr->sa_family == AF_INET) {
-            struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
-            inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
-        }
-    }
+    
+    char ip[INET_ADDRSTRLEN];               // get ip
+    strncpy(ip,get_my_ip(),INET_ADDRSTRLEN);
     printf("client IP is: %s\n", ip);
 
-    //create socket for client-LB connection and bind it
+    
     int lb_sock = socket(AF_INET, SOCK_STREAM, 0);
     assert(lb_sock != -1);
     struct sockaddr_in soc_Addr;                         //LB socket setup
     soc_Addr.sin_family = AF_INET;
-    soc_Addr.sin_port = htons(BASE_PORT);
+    soc_Addr.sin_port = htons(base_port);
     soc_Addr.sin_addr.s_addr = inet_addr(ip);
     res=bind(lb_sock, (struct sockaddr*)&soc_Addr , sizeof(soc_Addr));
     printf("bind client to LB socket:%d\n",res);
 
-    //connect client to LB
+   
     struct sockaddr_in lb_soc_Addr;                             
     lb_soc_Addr.sin_family = AF_INET;
-    lb_soc_Addr.sin_port = htons(LB_PORT);
-    lb_soc_Addr.sin_addr.s_addr = inet_addr(LB_IP);
+    lb_soc_Addr.sin_port = htons(LB_PORT);               //connect to LB
+    lb_soc_Addr.sin_addr.s_addr = inet_addr(lb_ip);
     res=connect(lb_sock, (struct sockaddr*)&lb_soc_Addr , sizeof(lb_soc_Addr));
     
-    //creating message to send to LB
-    int random_job_weight = (rand()%10)+1;
-    printf("my capacity is: %d\n",random_job_weight);
+    
+    printf("my capacity is: %d\n",capacity);        //creating message to send to LB
     char header_c[2];
-    sprintf(header_c,"%d",random_job_weight);
+    sprintf(header_c,"%d",capacity);
     char pyload[]="me client! you give me server";
     send_message(lb_sock, CLIENT_REQ, header_c, pyload, strlen(pyload));
 
-    //receive message from LB
-    struct message* lb_response_ptr = get_message(lb_sock);
+    
+    struct message* lb_response_ptr = get_message(lb_sock); //receive message from LB
     if(lb_response_ptr == NULL){
         close(lb_sock);
         return;
@@ -85,46 +80,29 @@ void main(){
     }
     printf("got valid ack message from LB: %s\n", lb_response.payload);
 
-    //parse data from lb_response
-    char job_id [2];
+    
+    char job_id [2];                    //parse data from lb_response
     job_id [0]= lb_response.header[0];
     job_id [1]='\0';
-    char server_ip[17];
-    int port;
-    int i;
-    for(i=0;i<strlen(lb_response.payload);i++){
-        if(lb_response.payload[i]==':'){
-            strncpy(server_ip,lb_response.payload,i);
-            server_ip[i]='\0';
-            char port_c[6];
-            strcpy(port_c,lb_response.payload+i+1);
-            port_c[5]='\0';
-            port=atoi(port_c);
-            break;
-        }
-    }
-    if(i==strlen(lb_response.payload)){
-        printf("i got invalid addres parsing. deallocating and going to cry in the corner...\n");
-        close(lb_sock);
-        return;
-    }
+
+    struct address* address=address_parsing(lb_response.payload);
     printf("closing connection to LB\n");
     close(lb_sock);
 
-    //connect to server
-    int server_socket= socket(AF_INET, SOCK_STREAM, 0);
+    
+    int server_socket= socket(AF_INET, SOCK_STREAM, 0);             //connect to server
     struct sockaddr_in server_soc_Addr;
     server_soc_Addr.sin_family = AF_INET;
-    server_soc_Addr.sin_port = htons(port);
-    server_soc_Addr.sin_addr.s_addr = inet_addr(server_ip);
+    server_soc_Addr.sin_port = htons(address->port);
+    server_soc_Addr.sin_addr.s_addr = inet_addr(address->ip);
     res = connect(server_socket, (struct sockaddr*)&server_soc_Addr, sizeof(server_soc_Addr));
     printf("connect to server: %d\n", res);
+    free(address);
 
-    //send and receive 2 messages from server
     int message_count = 0;
     char message[]="whasup?";
     printf("my message is:%s\n",message);
-    for(int j=0;j<MESSAGE_COUNT_TO_SERVER;j++){
+    for(int j=0;j<MESSAGE_COUNT_TO_SERVER;j++){                         //send messgae to server MESSAGE_COUNT_TO_SERVER times and close
         send_message(server_socket,CLIENT_JOB_MESSAGE,job_id,message,strlen(message));
         struct message* reply_ptr = get_message(lb_sock);
         if(reply_ptr == NULL){

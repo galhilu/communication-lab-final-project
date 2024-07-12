@@ -15,8 +15,6 @@
 #include <ifaddrs.h>
 
 
-#define BASE_PORT 1200
-#define LB_IP "127.0.0.1"             //change to fit for each run
 #define LB_PORT 8700
 
 int send_message(int sock,int type,char* header,char* payload,int payload_len);
@@ -28,56 +26,108 @@ struct job{
     int capacity;
 };
 
-int main(){
-    int capacity=5;
-    printf("my cap is:%d\n",capacity);
+pthread_mutex_t multi_mssg_pending_mutex;
+int multi_mssg_pending=0; // 0 for no message and 1 for received message
+
+void multicast_handler(char * multi_addr){
+    struct address* address=address_parsing(multi_addr);
+    //int multicast_rec = socket(AF_INET, SOCK_DGRAM, 0);              //create multicast
+    int multicast_rec;
+    if ((multicast_rec = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        perror("socket");
+        exit(1);
+    }
+    struct sockaddr_in multicast_rec_addr,group_addr;
+    struct ip_mreq group;
+    
+   
+
+    multicast_rec_addr.sin_family = AF_INET;
+    multicast_rec_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    multicast_rec_addr.sin_port = htons(address->port);
+    
+    
+    //setsockopt(multicast_rec, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    int opt = 1;
+    if (setsockopt(multicast_rec, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("setsockopt");
+        close(multicast_rec);
+        exit(1);
+    }
+    bind(multicast_rec, (struct sockaddr*)&multicast_rec_addr, sizeof(multicast_rec_addr));
+    
+    group.imr_multiaddr.s_addr = inet_addr(address->ip);
+    group.imr_interface.s_addr = htonl(INADDR_ANY);
+    setsockopt(multicast_rec, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char *)&group, sizeof(group));
+    //printf("setsockopt:%d\n",res);
+    char buffer[1024];
+    int addrlen;
+
+    char message_buff[3];
+    int res;
+    while (1) {
+
+        int nbytes = recvfrom(multicast_rec, message_buff, sizeof(message_buff), 0, (struct sockaddr*)&group_addr, &addrlen);
+        if(message_buff[1]-'0'==LB_UPDATE && multi_mssg_pending==0){
+            printf("flag up\n");
+            pthread_mutex_lock(&multi_mssg_pending_mutex);
+            multi_mssg_pending=1;
+            pthread_mutex_unlock(&multi_mssg_pending_mutex);
+        }
+
+        printf("Received message: %s\n", message_buff);
+    }
+    return;
+
+}
+
+
+
+
+
+
+int main(int argc, char *argv[]){
+    if(argc!=4){
+        printf("arguments are: LB ip, capacity(one digit), local port (will also use local port+1)\n");
+        return -1;
+    }
+    char lb_ip[16];
+    strncpy(lb_ip,argv[1],15);
+    lb_ip[15]=
+    printf("lb_ip%s\n",lb_ip);
+    int capacity=atoi(argv[2]);
+    int base_port=atoi(argv[3]);
+    printf("cap:%d\n",capacity);
+    printf("base_port%d\n",base_port);
 
     int res;
     struct ifaddrs *ifaddr, *ifa;
     char ip[INET_ADDRSTRLEN];
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        exit(EXIT_FAILURE);
-    }
-
-    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == NULL)
-            continue;
-
-        if (ifa->ifa_addr->sa_family == AF_INET) {
-            struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
-            inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
-        }
-    }
+    strncpy(ip,get_my_ip(),INET_ADDRSTRLEN);
     printf("server IP is: %s\n", ip);
 
     int lb_sock= socket(AF_INET, SOCK_STREAM, 0);
     assert (lb_sock != -1);
     struct sockaddr_in server_soc_Addr;                         //LB unicast socket setup
     server_soc_Addr.sin_family = AF_INET;
-    server_soc_Addr.sin_port = htons(BASE_PORT);
+    server_soc_Addr.sin_port = htons(base_port);
     server_soc_Addr.sin_addr.s_addr = inet_addr(ip);
     res=bind(lb_sock, (struct sockaddr*)&server_soc_Addr , sizeof(server_soc_Addr));
     if(res<0){
         printf("bind server failed\n");
         return 0;
     }
+    int opt = 1;
+    setsockopt(lb_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    // int client_sock= socket(AF_INET, SOCK_STREAM, 0);
-    // assert (client_sock != -1);
-    // struct sockaddr_in client_sock_Addr;                         //client socket setup
-    // client_sock_Addr.sin_family = AF_INET;
-    // client_sock_Addr.sin_port = htons(BASE_PORT+2);
-    // client_sock_Addr.sin_addr.s_addr = inet_addr(ip);
-    // res=bind(client_sock, (struct sockaddr*)&client_sock_Addr , sizeof(client_sock_Addr));
     int client_welcome_sock;
-    client_welcome_sock=createWelcomeSocket(BASE_PORT+2,3);
+    client_welcome_sock=createWelcomeSocket(base_port+1,3);
     printf("bind client socket:%d\n",client_welcome_sock);
     
     struct sockaddr_in lb_soc_Addr;                             
     lb_soc_Addr.sin_family = AF_INET;
     lb_soc_Addr.sin_port = htons(LB_PORT);
-    lb_soc_Addr.sin_addr.s_addr = inet_addr(LB_IP);
+    lb_soc_Addr.sin_addr.s_addr = inet_addr(lb_ip);
     //lb_soc_Addr.sin_addr.s_addr = INADDR_ANY; 
     res=connect(lb_sock, (struct sockaddr*)&lb_soc_Addr , sizeof(lb_soc_Addr));     //connect to lb
     if(res<0){
@@ -87,7 +137,7 @@ int main(){
     char client_sock_addr[20];
     strcpy(client_sock_addr,ip);
     strcat(client_sock_addr,":");                                           //make registration message and send to LB
-    sprintf(client_sock_addr+strlen(ip)+1,"%d",BASE_PORT+2);
+    sprintf(client_sock_addr+strlen(ip)+1,"%d",base_port+1);
 
     char capacity_c[2];   //is 2 only to stop warnings, will always be 1 char long
     sprintf(capacity_c,"%d",capacity);
@@ -111,8 +161,19 @@ int main(){
         close(client_welcome_sock);
         return 0;
     }
-    //create multicast
-    printf("got valid ack message from LB: %s",lb_response.payload);
+
+    printf("got valid ack message from LB: %s\n",lb_response.payload);
+
+    if (pthread_mutex_init(&multi_mssg_pending_mutex,NULL)!=0){      
+        printf("failed to init multi_mssg_pending_mutex\n");
+    }
+    
+    pthread_t multicast_thread;
+    pthread_create(&multicast_thread,NULL,(void*)&multicast_handler,lb_response.payload);
+    
+
+    
+    
 
     struct timeval select_timeout;
     select_timeout.tv_sec=1;
@@ -121,7 +182,6 @@ int main(){
     fd_set server_sockets,server_sockets_loop;
     FD_ZERO(&server_sockets);
     FD_SET(lb_sock,&server_sockets);
-    //FD_SET(multicast_sock,&server_sockets);
     FD_SET(client_welcome_sock,&server_sockets);
     int max_fd=client_welcome_sock;
 
@@ -131,16 +191,23 @@ int main(){
         client_jobs[i].job_id=-1;
         clients[i]=-1;
     }
+
     
+
+
+
+
+
+
     int running=1;
     while (running)
     { 
         server_sockets_loop=server_sockets;
         select(max_fd+1,&server_sockets_loop,NULL,NULL,&select_timeout);       //maby neet to change to max
         select_timeout.tv_sec=1;
-        printf("my cap is:%d\n",capacity);
-        
+
         if(FD_ISSET(lb_sock,&server_sockets_loop)){
+            printf("hi");
             struct message* new_message_ptr=get_message(lb_sock);
             if(new_message_ptr!=NULL){
                 struct message new_message=*new_message_ptr;
@@ -211,40 +278,41 @@ int main(){
                 struct message new_message=*new_message_ptr;
                 int new_client_job_id=new_message.header[0]-'0';
                 int i;
-                for(i=0;i<5;i++){
-                    if (client_jobs[i].job_id==new_client_job_id){
-                        clients[i]=new_client;
+                if(new_message.type==CLIENT_JOB_MESSAGE){
+                    for(i=0;i<5;i++){
+                        if (client_jobs[i].job_id==new_client_job_id){
+                            clients[i]=new_client;
+                            break;
+                        }
+                    }
+                    if(i==5){           //see if client is on the list
+                        printf("unregistered client! you shal not pass!\n");
+                        close(new_client);
+                        continue;
+                    }
+                    if(client_jobs[i].capacity*10<new_message.payload_len){
+                        printf("client's message excceded allocated capacity. bad client! right to jail! %d\n",new_message.payload_len);
+                        printf("max len is %d \n",client_jobs[i].capacity*10);
+                        close(clients[i]);
+                        client_jobs[i].job_id=-1;
+                        capacity=capacity+client_jobs[i].capacity;
                         break;
                     }
+                    FD_SET(new_client,&server_sockets); //add to fd set
+                    
+                    if(max_fd<new_client){              //update max fd
+                        max_fd=new_client;
+                    }
+                    printf("sending back to client\n");
+                    send_message(new_client,CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
                 }
-                if(i==5){           //see if client is on the list
-                    printf("unregistered client! you shal not pass!\n");
-                    close(new_client);
-                    continue;
+                else{
+                    printf("got invalid client message type\n");
                 }
-                FD_SET(new_client,&server_sockets); //add to fd set
-                
-                if(max_fd<new_client){              //update max fd
-                    max_fd=new_client;
-                }
-                printf("sending back to client\n");
-                send_message(new_client,CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
             }
             free(new_message_ptr);
         }
-        //if(FD_ISSET(multi sock,&server_sockets_loop))
-            // struct message* new_message_ptr=get_message(lb_sock);
-            // if(new_message_ptr!=NULL){
-            //     struct message new_message=*new_message_ptr;
-            //     if(new_message.type==LB_UPDATE){
-            //         sprintf(capacity_c,"%d",capacity);
-            //         send_message(lb_sock,SERVER_UPDATE,&capacity_c[0],client_sock_addr,strlen(client_sock_addr));
-            //     }
-            //     else{
-            //         printf("got unknown multicast message\n");
-            //     }
-            // }
-            
+
         for(int j=0;j<5;j++){       //set aside a place for client
             if(clients[j]!=-1){
                 if(FD_ISSET(clients[j],&server_sockets_loop)){
@@ -252,25 +320,31 @@ int main(){
                     struct message* new_message_ptr=get_message(clients[j]);
                     if(new_message_ptr!=NULL){
                         struct message new_message=*new_message_ptr;
-                        if(client_jobs[j].capacity*10<new_message.payload_len){
-                            printf("client's message excceded allocated capacity. bad client! right to jail! %d\n",new_message.payload_len);
-                            printf("ok len is %d max\n",client_jobs[j].capacity*10);
-                            close(clients[j]);
-                            client_jobs[j].job_id=-1;
-                            capacity=capacity+client_jobs[j].capacity;
-                            break;
-                        }
-                        if(strcmp(new_message.payload,"close")==0){
-                            printf("client is done, closing connection\n");
-                            close(clients[j]);
-                            client_jobs[j].job_id=-1;
-                            capacity=capacity+client_jobs[j].capacity;
-                            FD_CLR(clients[j],&server_sockets);
-                            break;
-                        }else{
-                            send_message(clients[j],CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
-                        }
+                        if(new_message.type==CLIENT_JOB_MESSAGE){
+                            client_jobs[j].timestamp=time(NULL);
+                            if(client_jobs[j].capacity*10<new_message.payload_len){
+                                printf("client's message excceded allocated capacity. bad client! right to jail! %d\n",new_message.payload_len);
+                                printf("ok len is %d max\n",client_jobs[j].capacity*10);
+                                close(clients[j]);
+                                client_jobs[j].job_id=-1;
+                                capacity=capacity+client_jobs[j].capacity;
+                                break;
+                            }
+                            if(strcmp(new_message.payload,"close")==0){
+                                printf("client is done, closing connection\n");
+                                close(clients[j]);
+                                client_jobs[j].job_id=-1;
+                                capacity=capacity+client_jobs[j].capacity;
+                                FD_CLR(clients[j],&server_sockets);
+                                break;
+                            }else{
+                                send_message(clients[j],CLIENT_JOB_MESSAGE,new_message.header,new_message.payload,new_message.payload_len);
+                            }
                         
+                        }
+                        else{
+                        printf("got invalid client message type\n");
+                        }
                     }
                     free(new_message_ptr);
                 }
@@ -278,13 +352,19 @@ int main(){
         }
 
         for(int i=0;i<5;i++){       //deallocate capacity for clients that didnt make contact in 5 secondes
-            if (client_jobs[i].job_id!=-1 && time(NULL)-client_jobs[i].timestamp>5 && clients[i]!=-1){
+            if (client_jobs[i].job_id!=-1 && time(NULL)-client_jobs[i].timestamp>5){
                 client_jobs[i].job_id=-1;
                 capacity=capacity+client_jobs[i].capacity;
             }
         }
-    
-
+        if(multi_mssg_pending==1){
+            sprintf(capacity_c,"%d",capacity);
+            send_message(lb_sock,SERVER_UPDATE,&capacity_c[0],client_sock_addr,strlen(client_sock_addr));
+            pthread_mutex_lock(&multi_mssg_pending_mutex);
+            multi_mssg_pending=0;
+            pthread_mutex_unlock(&multi_mssg_pending_mutex);
+            printf("sent update from multi\n");
+        }
     }
 
 
