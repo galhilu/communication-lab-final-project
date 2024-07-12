@@ -91,6 +91,7 @@ int main(){
 
     char capacity_c[2];   //is 2 only to stop warnings, will always be 1 char long
     sprintf(capacity_c,"%d",capacity);
+    capacity_c[1]='\0';
 
     send_message(lb_sock,SERVER_UPDATE,&capacity_c[0],client_sock_addr,strlen(client_sock_addr));
     struct message* lb_response_ptr=get_message(lb_sock);       //wait for LB ack
@@ -154,9 +155,9 @@ int main(){
                     case LB_JOB:
                     printf("got job message\n");
                         char job_cap=new_message.header[0];
-                        printf("the cap is %c\n",job_cap);
+                        printf("the asked cap is %c\n",job_cap);
                         if(job_cap<'0'||job_cap>'9'){
-                            printf("got bad capacity for job: %c discarding",job_cap);
+                            printf("got invalid capacity for job: %c discarding",job_cap);
                         }
                         else{
                             char job_id[2]; //job id
@@ -175,6 +176,7 @@ int main(){
                                         client_jobs[i].capacity=job_cap-'0';
                                         job_ans[0]='1'; //accept
                                         capacity=capacity-(job_cap-'0');
+                                        printf("my new capacity is:%d\n",capacity);
                                         break;
                                     }
                                 }
@@ -212,11 +214,11 @@ int main(){
                 for(i=0;i<5;i++){
                     if (client_jobs[i].job_id==new_client_job_id){
                         clients[i]=new_client;
-                        capacity=capacity+client_jobs[i].capacity;
                         break;
                     }
                 }
                 if(i==5){           //see if client is on the list
+                    printf("unregistered client! you shal not pass!\n");
                     close(new_client);
                     continue;
                 }
@@ -259,7 +261,7 @@ int main(){
                             break;
                         }
                         if(strcmp(new_message.payload,"close")==0){
-                            printf("client is done, closing connection");
+                            printf("client is done, closing connection\n");
                             close(clients[j]);
                             client_jobs[j].job_id=-1;
                             capacity=capacity+client_jobs[j].capacity;
