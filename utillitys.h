@@ -209,8 +209,6 @@ int createWelcomeSocket(int port, int maxClient){
         return -1;
     }
 
-    printf("Server is listen to port %d and wait for new client...\n", port);
-
     if((listen(serverSocket,maxClient))<0){
         perror("listen failed");
         close(serverSocket);

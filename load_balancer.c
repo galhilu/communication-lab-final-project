@@ -332,7 +332,6 @@ void client_connection( void* soc){
         server_cap=0;
         server_index=-1;
         for(i=0;i<MAX_SERVERS;i++){             //find next server to ask to do job
-            printf("%d\n",server_cap<registerd_servers.servers[i].capacity);
             if(server_cap<registerd_servers.servers[i].capacity && not_tried(servers_tried,registerd_servers.servers[i].id)){
                 server_cap=registerd_servers.servers[i].capacity;
                 server_id=registerd_servers.servers[i].id;
@@ -529,7 +528,7 @@ int main() {
                     pthread_create(&server_thread,NULL,(void*)&server_connection,(void*) &new_server_sock);
                 }
                 else{
-                    printf("main thread rejected a server, max server reached");
+                    printf("main thread rejected a server, max server reached\n");
                     close(new_server_sock);
                 }
             }
@@ -556,7 +555,7 @@ int main() {
                 update_timer=time(NULL);
             }
             if (time(NULL)-job_conf_clean_timer>=2){
-                printf("cleaning up job conformation list\n");
+                //printf("cleaning up job conformation list\n");
                 pthread_mutex_lock(&job_confirmation_list_mutex);
                 for(i=0;i<JOB_CONF_LEN;i++){
                     if(job_confirmation_list[i].req_id!=0 && time(NULL)-job_confirmation_list[i].time>5){

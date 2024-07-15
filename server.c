@@ -170,10 +170,6 @@ int main(int argc, char *argv[]){
     
     pthread_t multicast_thread;
     pthread_create(&multicast_thread,NULL,(void*)&multicast_handler,lb_response.payload);
-    
-
-    
-    
 
     struct timeval select_timeout;
     select_timeout.tv_sec=1;
@@ -192,13 +188,6 @@ int main(int argc, char *argv[]){
         clients[i]=-1;
     }
 
-    
-
-
-
-
-
-
     int running=1;
     while (running)
     { 
@@ -207,7 +196,6 @@ int main(int argc, char *argv[]){
         select_timeout.tv_sec=1;
 
         if(FD_ISSET(lb_sock,&server_sockets_loop)){
-            printf("hi");
             struct message* new_message_ptr=get_message(lb_sock);
             if(new_message_ptr!=NULL){
                 struct message new_message=*new_message_ptr;
@@ -286,7 +274,7 @@ int main(int argc, char *argv[]){
                         }
                     }
                     if(i==5){           //see if client is on the list
-                        printf("unregistered client! you shal not pass!\n");
+                        printf("unregistered client! you shall not pass!\n");
                         close(new_client);
                         continue;
                     }
@@ -296,7 +284,7 @@ int main(int argc, char *argv[]){
                         close(clients[i]);
                         client_jobs[i].job_id=-1;
                         capacity=capacity+client_jobs[i].capacity;
-                        break;
+                        continue;
                     }
                     FD_SET(new_client,&server_sockets); //add to fd set
                     
